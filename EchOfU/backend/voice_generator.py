@@ -31,26 +31,25 @@ class OpenVoiceService:
                 self.download_openvoice_models()
 
             # 设置设备
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
             # 配置路径 - 使用V2版本
             config_path = "EchOfU/OpenVoice/checkpoints_v2/config.json"
-            base_ckpt = "EchOfU/OpenVoice/checkpoints_v2/checkpoints.pth"
-            converter_ckpt = "EchOfU/OpenVoice/checkpoints_v2/converter.pth"
+            base_ckpt = "EchOfU/OpenVoice/checkpoints_v2/converter.pth"  # 注意：converter.pth包含完整模型
 
-            # 加载基础TTS模型
-            self.tts_model = BaseSpeakerTTS(config_path, device=device)
-            self.tts_model.load_ckpt(base_ckpt)
+            # 加载音色转换器（V2中converter.pth是主要模型文件）
+            self.tone_converter = ToneColorConverter(config_path, device=self.device)
+            self.tone_converter.load_ckpt(base_ckpt)
 
-            # 加载音色转换器
-            self.tone_converter = ToneColorConverter(config_path, device=device)
-            self.tone_converter.load_ckpt(converter_ckpt)
+            # 初始化TTS模型为None，将使用MeloTTS
+            self.tts_model = None  # V2版本推荐使用MeloTTS
 
             # 加载已保存的说话人特征
             self.speaker_features = self.load_speaker_features()
 
-            print(f"[OpenVoice] 模型加载完成，使用设备: {device}")
+            print(f"[OpenVoice] V2模型加载完成，使用设备: {self.device}")
             print(f"[OpenVoice] 已加载 {len(self.speaker_features)} 个说话人特征")
+            print("[OpenVoice] 注意：V2版本推荐使用MeloTTS作为基础TTS引擎")
 
         except Exception as e:
             print(f"[OpenVoice] 模型初始化失败: {e}")
@@ -158,10 +157,10 @@ class OpenVoiceService:
         return list(self.speaker_features.keys())
 
     def generate_speech(self, text, speaker_id=None):
-        """生成语音 - 统一接口"""
+        """生成语音 - 统一接口（V2版本）"""
         try:
-            if not self.tts_model:
-                print("[OpenVoice] TTS模型未初始化")
+            if not self.tone_converter:
+                print("[OpenVoice] 音色转换器未初始化")
                 return None
 
             # 生成输出文件名
@@ -169,17 +168,17 @@ class OpenVoiceService:
             output_path = f"static/voices/generated_{timestamp}.wav"
 
             if speaker_id and speaker_id in self.speaker_features:
-                # 使用说话人克隆
+                # 使用说话人克隆（V2方式）
                 return self.clone_voice_with_cached_feature(text, speaker_id, output_path)
             else:
-                # 使用基础TTS
-                return self.synthesize_speech(text, output_path)
+                # 使用基础TTS（MeloTTS或传统TTS）
+                return self.generate_base_speech(text, output_path)
 
         except Exception as e:
             print(f"[OpenVoice] 语音生成失败: {e}")
             return None
 
-    def clone_voice_with_cached_feature(self, text, speaker_id, output_path):
+    def clone_voice_with_cached_feature(self, text, speaker_id, output_path, base_speaker_key="ZH"):
         """使用缓存的说话人特征进行语音克隆"""
         try:
             if not self.tone_converter:
@@ -188,46 +187,126 @@ class OpenVoiceService:
             speaker_info = self.speaker_features[speaker_id]
             target_se = speaker_info['se']
 
-            # 1. 先用基础模型生成语音
+            # 1. 先用基础模型生成语音（使用MeloTTS或base speaker）
             temp_audio = f"temp_base_{speaker_id}_{int(time.time())}.wav"
-            self.tts_model.tts(
-                text=text,
-                output_path=temp_audio,
-                speaker="default",
-                language="Chinese"
-            )
+            base_speaker_path = self.generate_base_speech(text, temp_audio, base_speaker_key)
 
-            # 2. 使用缓存的特征进行音色转换
+            if not base_speaker_path:
+                return None
+
+            # 2. 加载基础说话人特征
+            source_se_path = f"EchOfU/OpenVoice/checkpoints_v2/base_speakers/ses/{base_speaker_key.lower()}.pth"
+            if os.path.exists(source_se_path):
+                source_se = torch.load(source_se_path, map_location=self.device)
+            else:
+                # 如果没有预训练的基础说话人特征，使用默认特征
+                print(f"[OpenVoice] 未找到基础说话人特征: {source_se_path}")
+                return None
+
+            # 3. 使用缓存的特征进行音色转换（根据V2官方示例）
+            encode_message = "@MyShell"  # V2版本的编码消息
             self.tone_converter.convert(
                 audio_src_path=temp_audio,
-                src_se="base_speakers/SE/base_speakers.pth",
+                src_se=source_se,
                 tgt_se=target_se,
-                output_path=output_path
+                output_path=output_path,
+                message=encode_message
             )
 
-            # 3. 清理临时文件
+            # 4. 清理临时文件
             if os.path.exists(temp_audio):
                 os.remove(temp_audio)
 
-            print(f"[OpenVoice] 使用缓存特征生成语音: {speaker_id}")
+            print(f"[OpenVoice] 使用V2模型和缓存特征生成语音: {speaker_id}")
             return output_path
 
         except Exception as e:
             print(f"[OpenVoice] 使用缓存特征生成语音失败: {e}")
             return None
 
-    def synthesize_speech(self, text, output_path, speaker="default", language="Chinese"):
-        """快速语音合成 - 模型已加载，直接使用"""
+    def generate_base_speech(self, text, output_path, base_speaker_key="ZH"):
+        """生成基础语音（支持MeloTTS和传统TTS）"""
         try:
-            # 直接使用已加载的模型
-            self.tts_model.tts(
-                text=text,
-                output_path=output_path,
-                speaker=speaker,
-                language=language,
-                speed=1.0
-            )
-            return output_path
+            # 尝试使用MeloTTS
+            if self.try_melotts_tts(text, output_path, base_speaker_key):
+                return output_path
+
+            # 回退到传统TTS
+            if self.tts_model:
+                self.tts_model.tts(
+                    text=text,
+                    output_path=output_path,
+                    speaker="default",
+                    language="Chinese",
+                    speed=1.0
+                )
+                return output_path
+            else:
+                print("[OpenVoice] 没有可用的TTS引擎")
+                return None
+
+        except Exception as e:
+            print(f"[OpenVoice] 基础语音生成失败: {e}")
+            return None
+
+    def try_melotts_tts(self, text, output_path, base_speaker_key="ZH"):
+        """尝试使用MeloTTS生成语音"""
+        try:
+            from melo.api import TTS
+
+            # 根据base_speaker_key确定语言
+            language_mapping = {
+                "EN_NEWEST": "EN", "EN": "EN",
+                "ES": "ES", "FR": "FR",
+                "ZH": "ZH", "JP": "JP", "KR": "KR"
+            }
+
+            language = language_mapping.get(base_speaker_key, "EN")
+
+            # 初始化MeloTTS
+            model = TTS(language=language, device=self.device)
+            speaker_ids = model.hps.data.spk2id
+
+            # 选择说话人ID
+            if base_speaker_key in speaker_ids:
+                speaker_id = speaker_ids[base_speaker_key]
+            else:
+                # 使用默认说话人
+                speaker_id = list(speaker_ids.values())[0]
+                print(f"[OpenVoice] 未找到说话人 {base_speaker_key}，使用默认说话人")
+
+            # ToDo : 可以让用户自己调节语速
+            # 生成语音
+            speed = 1.0
+            model.tts_to_file(text, speaker_id, output_path, speed=speed)
+
+            print(f"[OpenVoice] MeloTTS生成语音成功: {output_path}")
+            return True
+
+        except ImportError:
+            print("[OpenVoice] MeloTTS未安装，回退到传统TTS")
+            return False
+        except Exception as e:
+            print(f"[OpenVoice] MeloTTS生成失败: {e}")
+            return False
+
+    def synthesize_speech(self, text, output_path, speaker="default", language="Chinese"):
+        """快速语音合成 - 兼容性方法"""
+        try:
+            # 如果有TTS模型，使用传统方法
+            if self.tts_model:
+                self.tts_model.tts(
+                    text=text,
+                    output_path=output_path,
+                    speaker=speaker,
+                    language=language,
+                    speed=1.0
+                )
+                return output_path
+            else:
+                # 使用MeloTTS作为基础生成
+                return self.generate_base_speech(text, output_path, "ZH")
+
         except Exception as e:
             print(f"[OpenVoice] 语音合成失败: {e}")
             return None
@@ -328,7 +407,7 @@ class OpenVoiceService:
 
 def generate_voice(text, speaker_id=None):
     """
-    统一的语音生成接口
+    统一的语音生成接口（V2版本）
 
     Args:
         text (str): 要合成的文本
@@ -341,12 +420,12 @@ def generate_voice(text, speaker_id=None):
         # 获取OpenVoice服务实例
         openvoice_service = OpenVoiceService()
 
-        # 检查模型是否可用
-        if not openvoice_service.tts_model:
-            print("[OpenVoice] 模型未正确加载，请检查模型文件")
+        # 检查模型是否可用（主要检查音色转换器）
+        if not openvoice_service.tone_converter:
+            print("[OpenVoice] 音色转换器未正确加载，请检查模型文件")
             return None
 
-        # 生成语音
+        # 生成语音（V2架构）
         result_path = openvoice_service.generate_speech(text, speaker_id)
 
         if result_path and os.path.exists(result_path):
