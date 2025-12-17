@@ -65,6 +65,8 @@ def video_generation():
         # ==================== POST请求：处理视频生成 ====================
         try:
             # 收集表单数据
+
+            # ToDo : 这里也是一样，后续需要调整参数，参考音频路径以及改为参考音频编号
             data = {
                 "model_name": request.form.get('model_name', 'SyncTalk'),    # 生成模型选择
                 "model_param": request.form.get('model_param', ''),          # 模型参数路径
@@ -154,6 +156,7 @@ def model_training():
                 'task_id': f"train_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             })
 
+            # ToDo : 这里不够完善，后续可以返回训练日志或进度
         except Exception as e:
             return jsonify({
                 'status': 'error',
@@ -165,7 +168,7 @@ def model_training():
 
 @app.route('/audio_clone', methods=['GET', 'POST'])
 def audio_clone():
-    """音频克隆页面路由 - 处理高质量语音克隆请求"""
+    """音频克隆页面路由 - 处理语音克隆请求"""
 
     if request.method == 'POST':
         # ==================== POST请求：处理音频克隆 ====================
@@ -291,7 +294,7 @@ def audio_clone():
 
 @app.route('/api/cloned-audios', methods=['GET'])
 def get_cloned_audios():
-    """获取已克隆的音频列表API - 为音频克隆页面提供数据"""
+    """获取已克隆的音频列表API - 为页面提供数据"""
     try:
         # 使用OpenVoiceService获取实际已保存的说话人特征
         ov_service = OpenVoiceService()
@@ -335,6 +338,7 @@ def chat_system():
         # ==================== POST请求：处理对话生成 ====================
         try:
             # 收集对话参数
+            # ToDo : 这里参数有问题，后续需要调整
             data = {
                 "model_name": request.form.get('model_name', 'SyncTalk'),        # 对话模型选择
                 "model_param": request.form.get('model_param', ''),              # 模型参数路径
