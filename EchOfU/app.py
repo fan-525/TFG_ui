@@ -127,6 +127,35 @@ def model_training():
     
     return render_template('model_training.html')
 
+@app.route('/audio_clone', methods=['GET', 'POST'])
+def audio_clone():
+    if request.method == 'POST':
+        try:
+            data = {
+                "original_audio_path": request.form.get('original_audio_path', ''),
+                "audio_id": request.form.get('audio_id', ''),
+                "target_audio_id": request.form.get('target_audio_id', ''),
+                "gen_audio_id": request.form.get('gen_audio_id', ''),
+                "generate_text": request.form.get('generate_text', '')
+            }
+
+            # 这里应该调用实际的音频克隆和生成逻辑
+            # result = clone_audio(data)
+
+            return jsonify({
+                'status': 'success',
+                'message': '音频克隆处理完成',
+                'cloned_audio_path': f'static/voices/cloned_{data.get("target_audio_id", "output")}.wav'
+            })
+
+        except Exception as e:
+            return jsonify({
+                'status': 'error',
+                'message': str(e)
+            }), 500
+
+    return render_template('audio_clone.html')
+
 @app.route('/chat_system', methods=['GET', 'POST'])
 def chat_system():
     if request.method == 'POST':
@@ -137,21 +166,21 @@ def chat_system():
                 "voice_clone": request.form.get('voice_clone', 'false'),
                 "api_choice": request.form.get('api_choice', 'glm-4-plus')
             }
-            
+
             result = chat_response(data)
-            
+
             return jsonify({
                 'status': 'success',
                 'response': result,
                 'message': '对话生成成功'
             })
-            
+
         except Exception as e:
             return jsonify({
                 'status': 'error',
                 'message': str(e)
             }), 500
-    
+
     return render_template('chat_system.html')
 
 @app.route('/save_audio', methods=['POST'])
