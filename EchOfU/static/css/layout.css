@@ -111,6 +111,16 @@
     width: 80%;
 }
 
+.nav-link.active {
+    color: var(--neon-blue);
+    background: rgba(0, 243, 255, 0.1);
+    font-weight: 600;
+}
+
+.nav-link.active::after {
+    width: 100%;
+}
+
 /* 主容器 */
 .main-container {
     max-width: 1400px;

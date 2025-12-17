@@ -395,14 +395,15 @@
 </head>
 <body>
     <!-- 导航栏 -->
-    <nav style="background: rgba(0, 0, 0, 0.8); backdrop-filter: blur(10px); padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 1000;">
-        <a href="/" style="color: #00c6ff; font-size: 1.5rem; font-weight: bold; text-decoration: none;">
+    <nav class="neon-navbar">
+        <a href="/" class="nav-brand">
             <span>SYNCTALK</span>
         </a>
-        <ul style="display: flex; gap: 2rem; list-style: none; margin: 0; padding: 0;">
-            <li><a href="/model_training" style="color: #fff; text-decoration: none; transition: color 0.3s;">训练模型</a></li>
-            <li><a href="/video_generation" style="color: #fff; text-decoration: none; transition: color 0.3s;">视频生成</a></li>
-            <li><a href="/chat_system" style="color: #00c6ff; text-decoration: none; font-weight: bold;">人机对话</a></li>
+        <ul class="nav-menu">
+            <li><a href="/model_training" class="nav-link">训练模型</a></li>
+            <li><a href="/video_generation" class="nav-link">视频生成</a></li>
+            <li><a href="/audio_clone" class="nav-link">音频克隆</a></li>
+            <li><a href="/chat_system" class="nav-link active">人机对话</a></li>
         </ul>
     </nav>
 
