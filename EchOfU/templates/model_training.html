@@ -301,21 +301,15 @@
                             <label class="field-label">模型选择</label>
                             <select class="neon-input" name="model_choice">
                                 <option value="SyncTalk">SyncTalk</option>
-                                <option value="Wav2Lip">Wav2Lip Pro</option>
-                                <option value="Custom">自定义模型</option>
+                                <option value="ER_NeRF">ER_NeRF</option>
                             </select>
                         </div>
                         
                         <div class="form-field">
                             <label class="field-label">参考视频/图像</label>
-                            <div style="display: flex; gap: var(--space-2);">
-                                <input type="text" class="neon-input" 
-                                       placeholder="请输入文件路径" 
-                                       name="ref_video">
-                                <button type="button" class="neon-btn" style="white-space: nowrap;">
-                                    上传
-                                </button>
-                            </div>
+                            <input type="text" class="neon-input"
+                               placeholder="请输入参考视频/图像路径"
+                               name="ref_video">
                         </div>
                     </div>
                     

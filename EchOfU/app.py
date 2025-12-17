@@ -138,7 +138,8 @@ def audio_clone():
                 "gen_audio_id": request.form.get('gen_audio_id', ''),
                 "generate_text": request.form.get('generate_text', '')
             }
-
+            
+            # ToDO : 实现实际的音频克隆和生成逻辑
             # 这里应该调用实际的音频克隆和生成逻辑
             # result = clone_audio(data)
 
@@ -155,6 +156,31 @@ def audio_clone():
             }), 500
 
     return render_template('audio_clone.html')
+
+@app.route('/api/cloned-audios', methods=['GET'])
+def get_cloned_audios():
+    """获取已克隆的音频列表API"""
+    try:
+        # 模拟已克隆的音频数据
+        # ToDO : 替换成实际逻辑
+        # 实际应用中，这里应该从数据库或文件系统获取真实的音频列表
+        cloned_audios = [
+            {"id": "audio_001", "name": "audio_001", "created_at": "2025-01-17T10:30:00Z"},
+            {"id": "audio_002", "name": "audio_002", "created_at": "2025-01-17T11:15:00Z"},
+            {"id": "test_audio_01", "name": "test_audio_01", "created_at": "2025-01-17T09:45:00Z"},
+            {"id": "sample_voice", "name": "sample_voice", "created_at": "2025-01-17T08:20:00Z"}
+        ]
+
+        return jsonify({
+            'status': 'success',
+            'audios': cloned_audios
+        })
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
 @app.route('/chat_system', methods=['GET', 'POST'])
 def chat_system():

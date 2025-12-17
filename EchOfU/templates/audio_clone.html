@@ -50,23 +50,7 @@
             z-index: 1;
         }
 
-        .text-input-area {
-            background: var(--surface-secondary);
-            border: 1px solid rgba(0, 243, 255, 0.2);
-            border-radius: var(--radius-md);
-            padding: var(--space-3);
-            min-height: 120px;
-            resize: vertical;
-            width: 100%;
-            color: var(--text-primary);
-        }
-
-        .text-input-area:focus {
-            outline: none;
-            border-color: var(--neon-blue);
-            box-shadow: 0 0 0 2px rgba(0, 243, 255, 0.1);
-        }
-    </style>
+      </style>
 </head>
 <body>
     <!-- 导航栏 -->
@@ -189,10 +173,14 @@
                         </div>
                         <div class="control-grid">
                             <div>
-                                <label class="indicator-label">音频编号</label>
-                                <input type="text" class="neon-input"
-                                       placeholder="输入音频编号"
-                                       name="gen_audio_id" id="genAudioId">
+                                <label class="indicator-label">克隆音频编号</label>
+                                <select class="neon-input" name="gen_audio_id" id="genAudioId">
+                                    <option value="">请选择克隆音频</option>
+                                    <!-- 选项将通过JavaScript从后端加载 -->
+                                </select>
+                                <small style="color: var(--text-secondary); font-size: 0.875rem; margin-top: var(--space-1); display: block;">
+                                    选择已克隆的音频编号
+                                </small>
                             </div>
 
                             <div>
@@ -365,6 +353,32 @@
             }
         });
 
+        // 从后端加载克隆音频列表（用于生成音频部分）
+        async function loadClonedAudioListForGeneration() {
+            try {
+                const response = await fetch('/api/cloned-audios');
+                const result = await response.json();
+
+                if (result.status === 'success' && result.audios) {
+                    const genAudioSelect = document.getElementById('genAudioId');
+                    genAudioSelect.innerHTML = '<option value="">请选择克隆音频</option>';
+                    result.audios.forEach(audio => {
+                        const option = document.createElement('option');
+                        option.value = audio.id;
+                        option.textContent = audio.id;
+                        genAudioSelect.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('加载克隆音频列表失败:', error);
+                // 提供一些默认选项
+                const genAudioSelect = document.getElementById('genAudioId');
+                genAudioSelect.innerHTML = '<option value="">请选择克隆音频</option>' +
+                                       '<option value="audio_001">audio_001</option>' +
+                                       '<option value="audio_002">audio_002</option>';
+            }
+        }
+
         // 生成音频
         document.getElementById('generateAudioBtn').addEventListener('click', async function() {
             const genAudioId = document.getElementById('genAudioId').value.trim();
@@ -423,6 +437,11 @@
                 btn.innerHTML = '生成音频';
                 setTimeout(() => { progressSection.style.display = 'none'; }, 2000);
             }
+        });
+
+        // 页面加载时初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            loadClonedAudioListForGeneration();
         });
     </script>
 </body>

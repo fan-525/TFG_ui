@@ -162,34 +162,26 @@
                                 <label class="indicator-label">模型名称</label>
                                 <select class="neon-input" name="model_name">
                                     <option value="SyncTalk">SyncTalk</option>
-                                    <option value="Wav2Lip">Wav2Lip Pro</option>
-                                    <option value="Custom">自定义模型</option>
+                                    <option value="ER_NeRF">ER_NeRF</option>
                                 </select>
                             </div>
                             
                             <div>
                                 <label class="indicator-label">模型目录</label>
-                                <div style="display: flex; gap: var(--space-2);">
-                                    <input type="text" class="neon-input" 
-                                           placeholder="/SyncTalk/modelwide" 
-                                           name="model_param">
-                                    <button type="button" class="neon-btn" style="white-space: nowrap;">
-                                        浏览
-                                    </button>
-                                </div>
+                                <input type="text" class="neon-input"
+                                   placeholder="/SyncTalk/modelwide"
+                                   name="model_param">
                             </div>
                             
                                 <div>
-                                    <label class="indicator-label">参考音频</label>
-                                    <div style="display: flex; gap: var(--space-2); align-items:center;">
-                                        <input type="text" class="neon-input" 
-                                               placeholder="请选择音频文件" 
-                                               name="ref_audio" id="refAudioPath" readonly>
-                                        <button type="button" class="neon-btn" id="uploadAudioBtn" style="white-space: nowrap;">上传</button>
-                                        <input type="file" id="refAudioInput" accept="audio/*" style="display:none">
-                                    </div>
+                                    <label class="indicator-label">克隆音频编号</label>
+                                    <select class="neon-input" name="ref_audio_id" id="refAudioId">
+                                        <option value="">请选择克隆音频</option>
+{#                                        ToDo: 替换实际逻辑#}
+                                        <!-- 选项将通过JavaScript从后端加载 -->
+                                    </select>
                                     <small style="color: var(--text-secondary); font-size: 0.875rem; margin-top: var(--space-1); display: block;">
-                                        上传后文件会发送到服务器并替换参考音频
+                                        选择已克隆的音频编号
                                     </small>
                                 </div>
                         </div>
@@ -199,19 +191,14 @@
                         <div class="control-title">
                             <span>硬件配置</span>
                         </div>
-                        <div class="gpu-selector">
-                            <label class="gpu-option">
-                                <input type="radio" name="gpu_choice" value="GPU0" checked hidden>
-                                <span class="gpu-label">GPU 0</span>
-                            </label>
-                            <label class="gpu-option">
-                                <input type="radio" name="gpu_choice" value="GPU1" hidden>
-                                <span class="gpu-label">GPU 1</span>
-                            </label>
-                            <label class="gpu-option">
-                                <input type="radio" name="gpu_choice" value="GPU2" hidden>
-                                <span class="gpu-label">GPU 2</span>
-                            </label>
+                        <div class="control-grid">
+                            <div>
+                                <label class="indicator-label">GPU选择</label>
+                                <select class="neon-input" name="gpu_choice">
+                                    <option value="GPU0" selected>GPU 0</option>
+                                    <option value="GPU1">GPU 1</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
                     
@@ -254,39 +241,36 @@
             return '最终处理...';
         }
 
-        // 音频上传处理与视频预览逻辑
-        const uploadBtn = document.getElementById('uploadAudioBtn');
-        const audioInput = document.getElementById('refAudioInput');
-        const refAudioPath = document.getElementById('refAudioPath');
+        // 视频预览逻辑
+        const refAudioId = document.getElementById('refAudioId');
         const videoPreview = document.getElementById('videoPreview');
 
-        uploadBtn.addEventListener('click', () => audioInput.click());
-        audioInput.addEventListener('change', async (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-
-            const fd = new FormData();
-            fd.append('audio', file);
-
-            uploadBtn.disabled = true;
-            uploadBtn.textContent = '上传中...';
-
+        // 从后端加载克隆音频列表
+        async function loadClonedAudioList() {
             try {
-                const resp = await fetch('/save_audio', { method: 'POST', body: fd });
-                const data = await resp.json();
-                if (data.status === 'success') {
-                    refAudioPath.value = data.path || '';
-                } else {
-                    alert('上传失败: ' + (data.message || '未知错误'));
+                const response = await fetch('/api/cloned-audios');
+                const result = await response.json();
+
+                if (result.status === 'success' && result.audios) {
+                    refAudioId.innerHTML = '<option value="">请选择克隆音频</option>';
+                    result.audios.forEach(audio => {
+                        const option = document.createElement('option');
+                        option.value = audio.id;
+                        option.textContent = audio.id;
+                        refAudioId.appendChild(option);
+                    });
                 }
-            } catch (err) {
-                console.error(err);
-                alert('上传失败，请检查控制台');
-            } finally {
-                uploadBtn.disabled = false;
-                uploadBtn.textContent = '上传';
+            } catch (error) {
+                console.error('加载克隆音频列表失败:', error);
+                // 提供一些默认选项
+                refAudioId.innerHTML = '<option value="">请选择克隆音频</option>' +
+                                       '<option value="audio_001">audio_001</option>' +
+                                       '<option value="audio_002">audio_002</option>';
             }
-        });
+        }
+
+        // 页面加载时获取克隆音频列表
+        document.addEventListener('DOMContentLoaded', loadClonedAudioList);
 
         // 替换预览区域为 video 元素并播放
         function showGeneratedVideo(videoPath) {

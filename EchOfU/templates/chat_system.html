@@ -493,12 +493,15 @@
                     <div class="config-items">
                         <div class="config-item">
                             <div class="config-label">模型名称</div>
-                            <div class="config-value">SyncTalk</div>
+                            <select class="neon-input" id="modelSelect" style="width: 100%;">
+                                <option value="SyncTalk" selected>SyncTalk</option>
+                                <option value="ER_NeRF">ER_NeRF</option>
+                            </select>
                         </div>
                         
                         <div class="config-item">
                             <div class="config-label">模型路径</div>
-                            <div class="config-value">/SyncTalk/modelwide</div>
+                            <input type="text" class="neon-input" value="/SyncTalk/modelwide" id="modelPath" style="width: 100%;">
                         </div>
                     </div>
                 </div>
@@ -509,14 +512,14 @@
                     </h3>
                     <div class="config-items">
                         <div class="config-item">
-                            <div class="config-label">语音克隆</div>
-                            <div style="display: flex; align-items: center; gap: 8px;">
-                                <label class="neon-switch">
-                                    <input type="checkbox" id="voiceCloneToggle" checked>
-                                    <span class="neon-slider"></span>
-                                </label>
-                                <span class="config-value">启用</span>
-                            </div>
+                            <div class="config-label">克隆音频编号</div>
+                            <select class="neon-input" name="ref_audio_id" id="voiceCloneSelect" style="width: 100%;">
+                                <option value="">请选择克隆音频</option>
+                                <!-- 选项将通过JavaScript从后端加载 -->
+                            </select>
+                            <small style="color: var(--text-secondary); font-size: 0.875rem; margin-top: var(--space-1); display: block;">
+                                选择已克隆的音频编号
+                            </small>
                         </div>
                         
                         <div class="config-item">
@@ -738,7 +741,7 @@
             const formData = new FormData();
             formData.append('model_name', 'SyncTalk');
             formData.append('model_param', '/SyncTalk/modelwide');
-            formData.append('voice_clone', document.getElementById('voiceCloneToggle').checked ? 'enable' : 'disable');
+            formData.append('ref_audio_id', document.getElementById('voiceCloneSelect').value || '');
             formData.append('api_choice', document.getElementById('apiSelect').value);
             
             try {
@@ -846,13 +849,41 @@
             }
         });
         
+        // 从后端加载克隆音频列表
+        // ToDO : 实现具体加载逻辑
+        async function loadClonedAudioList() {
+            try {
+                const response = await fetch('/api/cloned-audios');
+                const result = await response.json();
+
+                if (result.status === 'success' && result.audios) {
+                    const voiceCloneSelect = document.getElementById('voiceCloneSelect');
+                    voiceCloneSelect.innerHTML = '<option value="">请选择克隆音频</option>';
+                    result.audios.forEach(audio => {
+                        const option = document.createElement('option');
+                        option.value = audio.id;
+                        option.textContent = audio.id;
+                        voiceCloneSelect.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('加载克隆音频列表失败:', error);
+                // 提供一些默认选项
+                const voiceCloneSelect = document.getElementById('voiceCloneSelect');
+                voiceCloneSelect.innerHTML = '<option value="">请选择克隆音频</option>' +
+                                       '<option value="audio_001">audio_001</option>' +
+                                       '<option value="audio_002">audio_002</option>';
+            }
+        }
+
         // 初始化
         window.addEventListener('load', () => {
             initWaveform();
+            loadClonedAudioList();
             setInterval(updateSystemStatus, 5000);
             updateSystemStatus();
         });
-        
+
         // 响应式调整波形图大小
         window.addEventListener('resize', initWaveform);
     </script>
