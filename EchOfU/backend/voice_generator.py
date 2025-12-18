@@ -3,6 +3,7 @@ import time
 import json
 import subprocess
 import torch
+import threading
 from datetime import datetime
 from openvoice.api import BaseSpeakerTTS, ToneColorConverter
 from openvoice import se_extractor
@@ -419,52 +420,112 @@ class VoiceGenerator:
 
 
 class OpenVoiceService:
-    """OpenVoice服务主类 - 协调各个组件"""
+    """
+    OpenVoice服务主类 - 协调各个组件
+    线程安全的懒汉式单例模式
+    """
 
     _instance = None
+    _lock = threading.Lock()
     _initialized = False
 
     def __new__(cls):
+        """双重检查锁定实现懒汉式单例"""
         if cls._instance is None:
-            cls._instance = super(OpenVoiceService, cls).__new__(cls)
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super(OpenVoiceService, cls).__new__(cls)
         return cls._instance
 
     def __init__(self):
-        if not self._initialized:
-            print("[OpenVoice] ===============================================")
-            print("[OpenVoice] 初始化OpenVoice服务...")
-            print("[OpenVoice] ===============================================")
+        """初始化方法（只执行一次）"""
+        if not OpenVoiceService._initialized:
+            with OpenVoiceService._lock:
+                if not OpenVoiceService._initialized:
+                    self._initialize_service()
+                    OpenVoiceService._initialized = True
 
-            # 初始化组件
-            print("[OpenVoice] 初始化PathManager...")
-            self.path_manager = PathManager()
-            print(f"[OpenVoice] PathManager初始化完成，项目根目录: {self.path_manager.project_root}")
+    def _initialize_service(self):
+        """实际的服务初始化逻辑"""
+        print("[OpenVoice] ===============================================")
+        print("[OpenVoice] 初始化OpenVoice服务...")
+        print("[OpenVoice] ===============================================")
 
-            print("[OpenVoice] 初始化ModelManager...")
-            self.model_manager = ModelManager(self.path_manager)
+        # 初始化组件
+        print("[OpenVoice] 初始化PathManager...")
+        self.path_manager = PathManager()
+        print(f"[OpenVoice] PathManager初始化完成，项目根目录: {self.path_manager.project_root}")
 
-            print("[OpenVoice] 初始化SpeakerFeatureManager...")
-            self.feature_manager = SpeakerFeatureManager(self.path_manager)
+        print("[OpenVoice] 初始化ModelManager...")
+        self.model_manager = ModelManager(self.path_manager)
 
-            print("[OpenVoice] 初始化VoiceGenerator...")
-            self.voice_generator = VoiceGenerator(self.path_manager)
+        print("[OpenVoice] 初始化SpeakerFeatureManager...")
+        self.feature_manager = SpeakerFeatureManager(self.path_manager)
 
-            print("[OpenVoice] 初始化AudioProcessor...")
-            self.audio_processor = AudioProcessor()
+        print("[OpenVoice] 初始化VoiceGenerator...")
+        self.voice_generator = VoiceGenerator(self.path_manager)
 
-            # 初始化模型
-            print("[OpenVoice] 开始初始化模型组件...")
-            # 确保tts_model属性存在（V2版本主要使用MeloTTS）
-            self.tts_model = None
-            self._initialize_components()
-            OpenVoiceService._initialized = True
+        print("[OpenVoice] 初始化AudioProcessor...")
+        self.audio_processor = AudioProcessor()
 
-            print("[OpenVoice] ===============================================")
-            print("[OpenVoice] OpenVoice服务初始化完成")
-            print(f"[OpenVoice] 服务ID: {id(self)}")
-            print(f"[OpenVoice] 音色转换器状态: {'✅ 已加载' if self.tone_converter else '❌ 未加载'}")
-            print(f"[OpenVoice] 已加载说话人数量: {len(self.feature_manager.speaker_features)}")
-            print("==============================================")
+        # 初始化模型
+        print("[OpenVoice] 开始初始化模型组件...")
+        # 确保tts_model属性存在（V2版本主要使用MeloTTS）
+        self.tts_model = None
+        self._initialize_components()
+
+        print("[OpenVoice] ===============================================")
+        print("[OpenVoice] OpenVoice服务初始化完成")
+        print(f"[OpenVoice] 服务ID: {id(self)}")
+        print(f"[OpenVoice] 音色转换器状态: {'✅ 已加载' if self.tone_converter else '❌ 未加载'}")
+        print(f"[OpenVoice] 已加载说话人数量: {len(self.feature_manager.speaker_features)}")
+        print("==============================================")
+
+    @classmethod
+    def get_instance(cls):
+        """
+        获取OpenVoiceService单例实例
+
+        Returns:
+            OpenVoiceService: 服务实例
+        """
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = cls()
+        return cls._instance
+
+    @classmethod
+    def get(cls):
+        """
+        获取OpenVoiceService单例实例的简化方法
+
+        Returns:
+            OpenVoiceService: 服务实例
+        """
+        return cls.get_instance()
+
+    @classmethod
+    def is_initialized(cls):
+        """
+        检查服务是否已初始化
+
+        Returns:
+            bool: 是否已初始化
+        """
+        return cls._initialized
+
+    @classmethod
+    def reset_instance(cls):
+        """
+        重置单例实例（主要用于测试）
+        注意：这会清除当前实例，下次调用get_instance会创建新实例
+        """
+        with cls._lock:
+            if cls._instance is not None:
+                # 可以在这里执行清理操作
+                cls._instance = None
+                cls._initialized = False
 
     def _initialize_components(self):
         """初始化所有组件"""
