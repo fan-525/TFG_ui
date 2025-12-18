@@ -31,7 +31,7 @@ def train_model(data):
     print("[backend.model_trainer] 模型训练中...")
 
     if model_choice == "SyncTalk":
-        # SyncTalk 逻辑 (保持原样或按需微调路径)
+        # SyncTalk 逻辑 (微调路径)
         try:
             cmd = [
                 "./SyncTalk/run_synctalk.sh", "train",
@@ -55,13 +55,10 @@ def train_model(data):
             print("[backend.model_trainer] 开始 ER-NeRF 训练流程...")
             
             er_nerf_root = "./ER-NeRF"
-            # 预处理数据存放路径 (通常放在 ER-NeRF 下的 data 目录方便脚本调用)
-            # 或者统一放到 static/data 下，这里暂时遵循 ER-NeRF 习惯
+            # 预处理数据存放路径 (放在 ER-NeRF 下的 data 目录方便脚本调用)
             preprocess_data_path = os.path.join("data", task_id) 
             
-            # -----------------------------------------------------------
             # 步骤 1: 数据预处理
-            # -----------------------------------------------------------
             print(f"[backend.model_trainer] [1/2] 正在进行数据预处理: {ref_video_path}")
             
             process_cmd = [
@@ -71,12 +68,10 @@ def train_model(data):
             ]
             subprocess.run(process_cmd, check=True)
             
-            # -----------------------------------------------------------
             # 步骤 2: 模型训练
-            # -----------------------------------------------------------
             print(f"[backend.model_trainer] [2/2] 开始训练 ER-NeRF 模型...")
             
-            # 获取训练轮数，默认为10 (前端文档标准)
+            # 获取训练轮数，默认为10 (前端文档)
             epochs = str(data.get('epoch', 10))
             
             train_cmd = [
@@ -93,7 +88,7 @@ def train_model(data):
             custom_params = data.get('custom_params', '')
             if custom_params:
                 print(f"[backend.model_trainer] 解析自定义参数: {custom_params}")
-                params_list = custom_params.split(',') # 假设逗号分隔
+                params_list = custom_params.split(',') # 逗号分隔
                 for param in params_list:
                     if '=' in param:
                         key, value = param.split('=')
@@ -123,7 +118,7 @@ def train_model(data):
             print(f"[backend.model_trainer] ER-NeRF 训练成功！模型保存在: {model_save_path}")
             
             # 如果训练过程生成了 validation 视频，可以拷贝一份到 res_videos
-            # 假设 validation 视频在 model_save_path/validation/ 目录下 (视具体实现而定)
+            
             
         except subprocess.CalledProcessError as e:
             print(f"[backend.model_trainer] ER-NeRF 训练失败: {e.returncode}")
@@ -138,6 +133,7 @@ def train_model(data):
 
 
 #  我发现老师的训练逻辑是单独训练视频生成模型，然后再单独提取语音特征进行克隆，所以在模型训练这里应该不用再提取语音特征
+
 
 
 
