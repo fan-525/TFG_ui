@@ -334,7 +334,7 @@ class VoiceGenerator:
         return self._melotts_models[cache_key]
 
 
-    def generate_with_melotts_tts(self, text, output_path, base_speaker_key="ZH" ,speed = 1.0):
+    def generate_with_melotts_tts(self, text, output_path, base_speaker_key="ZH" ,speed = 0.9):
         """尝试使用MeloTTS生成语音"""
         # 保存原始环境变量
         import os
@@ -607,21 +607,21 @@ class OpenVoiceService:
             if speaker_id and speaker_id in self.feature_manager.speaker_features:
                 # 使用说话人克隆（V2方式）
                 if not self.tone_converter:
-                    print("[OpenVoice] ❌ 语音克隆需要音色转换器，但转换器未初始化")
+                    print("[OpenVoice]  语音克隆需要音色转换器，但转换器未初始化")
                     return None
 
-                print(f"[OpenVoice] 🎭 使用说话人克隆模式: {speaker_id}")
+                print(f"[OpenVoice]  使用说话人克隆模式: {speaker_id}")
                 print(f"[OpenVoice] 可用说话人: {list(self.feature_manager.speaker_features.keys())}")
                 return self._clone_voice_with_cached_feature(text, speaker_id, output_path)
             else:
                 # 使用基础TTS（MeloTTS）
                 print("[OpenVoice] 🎤 使用基础TTS模式（MeloTTS）")
                 if speaker_id:
-                    print(f"[OpenVoice] ⚠️  说话人 {speaker_id} 不存在，切换到基础TTS")
+                    print(f"[OpenVoice]   说话人 {speaker_id} 不存在，切换到基础TTS")
                 return self._generate_base_speech(text, output_path)
 
         except Exception as e:
-            print(f"[OpenVoice] ❌ 语音生成异常: {type(e).__name__}: {e}")
+            print(f"[OpenVoice]  语音生成异常: {type(e).__name__}: {e}")
             import traceback
             print(f"[OpenVoice] 错误堆栈:")
             traceback.print_exc()
