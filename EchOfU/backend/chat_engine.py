@@ -51,7 +51,8 @@ def chat_response(data):
     print(f"[backend.chat_engine] AI回复文本: {ai_response_text}")
 
     # 3. 语音合成 (OpenVoice)
-    ov = OpenVoiceService()
+    # 虽然 OpenVoiceService 内部可能也有路径管理，但为了统一结果存放，我们这里进行调度
+    ov = OpenVoiceService.get_instance()
 
     # 获取前端传递的 speaker_id，如果没传则默认
     speaker_id = data.get('speaker_id', 'default')
@@ -163,3 +164,4 @@ def get_ai_response(input_text_file, output_text_file, api_key, model):
     except Exception as e:
         print(f"AI回答生成错误: {e}")
         return "AI服务暂时不可用"
+
