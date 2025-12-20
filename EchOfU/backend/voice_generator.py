@@ -3,60 +3,13 @@ import time
 import json
 import subprocess
 import torch
+import threading
 from datetime import datetime
+
+from nltk.lm import Vocabulary
 from openvoice.api import BaseSpeakerTTS, ToneColorConverter
 from openvoice import se_extractor
-
-
-class PathManager:
-    """路径管理器，统一处理所有路径相关逻辑"""
-
-    def __init__(self):
-        self.project_root = self._get_project_root()
-
-    def _get_project_root(self):
-        """获取项目根目录路径 - 递归向上查找EchOfU目录"""
-        def find_echofu_root(start_dir):
-            current_dir = os.path.abspath(start_dir)
-
-            # 如果当前目录名是EchOfU，检查是否有OpenVoice目录
-            if os.path.basename(current_dir) == "EchOfU":
-                if os.path.exists(os.path.join(current_dir, "OpenVoice")):
-                    return current_dir
-
-            # 如果当前目录包含EchOfU子目录，使用它
-            echofu_subdir = os.path.join(current_dir, "EchOfU")
-            if os.path.exists(echofu_subdir) and os.path.exists(os.path.join(echofu_subdir, "OpenVoice")):
-                return echofu_subdir
-
-            # 如果已经到达根目录还没找到，返回None
-            parent_dir = os.path.dirname(current_dir)
-            if parent_dir == current_dir:
-                return None
-
-            # 递归向上查找
-            return find_echofu_root(parent_dir)
-
-        result = find_echofu_root(os.getcwd())
-        if result is None:
-            raise FileNotFoundError("无法找到EchOfU项目根目录")
-        return result
-
-    def get_model_path(self, *path_parts):
-        """获取模型相关路径"""
-        return os.path.join(self.project_root, *path_parts)
-
-    def get_openvoice_v2_path(self, *path_parts):
-        """获取OpenVoice V2相关路径"""
-        return self.get_model_path("OpenVoice/checkpoints_v2", *path_parts)
-
-    def get_speaker_features_path(self):
-        """获取说话人特征文件路径"""
-        return os.path.join(self.project_root, "models/OpenVoice/speaker_features.json")
-
-    def get_output_voice_path(self, timestamp):
-        """生成输出语音文件路径"""
-        return os.path.join(self.project_root, f"static/voices/generated_{timestamp}.wav")
+from .path_manager import PathManager
 
 
 class ModelDownloader:
@@ -115,20 +68,20 @@ class AudioProcessor:
         """从视频中提取音频"""
         try:
             # 确保输出目录存在 - 使用PathManager
-            audio_dir = self.path_manager.get_model_path("static/audios")
-            os.makedirs(audio_dir, exist_ok=True)
+            audio_dir = self.path_manager.get_ref_voice_path()
+            self.path_manager.ensure_directory(audio_dir)
 
             # 生成音频文件名 - 使用PathManager
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            audio_output = os.path.join(audio_dir, f"extracted_{timestamp}.wav")
+            audio_output = self.path_manager.get_extracted_voice_path(timestamp)
 
             # 使用ffmpeg提取音频
             cmd = [
                 "ffmpeg", "-i", video_path,
                 "-vn",  # 禁用视频
-                "-acodec", "pcm_s16le",  # 音频编码
-                "-ar", "16000",  # 采样率
-                "-ac", "1",  # 单声道
+                "-acodec", "pcm_s24le",  # 音频编码
+                "-ar", "22050",  # 采样率
+                "-af", "highpass=80,lowpass=8000,dynaudnorm=p=0.95:s=5",  # 单声道
                 "-y",  # 覆盖输出文件
                 audio_output
             ]
@@ -190,8 +143,8 @@ class SpeakerFeatureManager:
     def save_feature(self, speaker_id, reference_audio, se_tensor):
         """保存说话人特征"""
         try:
-            # 保存特征张量 - 使用PathManager获取绝对路径
-            feature_path = self.path_manager.get_model_path("models/OpenVoice", f"{speaker_id}_se.pth")
+            # 保存特征张量 - 使用PathManager的专门方法
+            feature_path = self.path_manager.get_speaker_feature_tensor_path(speaker_id)
             torch.save(se_tensor, feature_path)
 
             # 保存元数据
@@ -242,12 +195,13 @@ class SpeakerFeatureManager:
 
             print(f"[SpeakerFeatureManager] 开始提取说话人特征: {speaker_id}")
 
-            # 提取说话人特征 - 使用PathManager获取processed目录的绝对路径
-            processed_dir = self.path_manager.get_model_path("processed")
+            # 提取说话人特征 - 使用PathManager获取processed目录
+            processed_dir = self.path_manager.get_processed_path()
             target_se_result = se_extractor.get_se(
                 reference_audio,
                 vc_model=tone_converter,
-                target_dir=processed_dir
+                target_dir=processed_dir,
+                vad=True
             )
 
             # get_se返回元组(se_tensor, audio_name) 只需要张量部分
@@ -272,7 +226,7 @@ class ModelManager:
 
     def __init__(self, path_manager):
         self.path_manager = path_manager
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = DeviceUtils._get_optimal_device()
         self.tone_converter = None
 
     def initialize(self):
@@ -290,7 +244,7 @@ class ModelManager:
             config_path = self.path_manager.get_openvoice_v2_path("converter/config.json")
             base_ckpt = self.path_manager.get_openvoice_v2_path("converter/checkpoint.pth")
 
-            # 加载音色转换器
+            # 加载音色转换器（禁用水印以避免下载模型）
             self.tone_converter = ToneColorConverter(config_path, device=self.device)
             self.tone_converter.load_ckpt(base_ckpt)
 
@@ -301,17 +255,21 @@ class ModelManager:
             print(f"[ModelManager] 模型初始化失败: {e}")
             return False
 
+
+
     def _ensure_directories(self):
         """确保必要目录存在"""
         dirs = [
             self.path_manager.get_openvoice_v2_path(),
-            self.path_manager.get_model_path("OpenVoice/checkpoints/base_speakers"),
-            self.path_manager.get_model_path("models/OpenVoice"),
-            self.path_manager.get_model_path("static/voices"),
-            self.path_manager.get_model_path("processed")
+            self.path_manager.get_root_begin_path("OpenVoice/checkpoints/base_speakers"),
+            self.path_manager.get_openvoice_model_path(),
+            self.path_manager.get_ref_voice_path(),                    # 参考音频目录
+            self.path_manager.get_res_voice_path(),                    # 结果音频目录
+            self.path_manager.get_processed_path()
         ]
         for dir_path in dirs:
-            os.makedirs(dir_path, exist_ok=True)
+            self.path_manager.ensure_directory(dir_path)
+            print(f"[ModelManager] 确保目录存在: {dir_path}")
 
     def _check_models_exist(self):
         """检查模型文件是否存在"""
@@ -375,7 +333,8 @@ class VoiceGenerator:
             print(f"[VoiceGenerator] MeloTTS模型初始化成功并缓存")
         return self._melotts_models[cache_key]
 
-    def generate_with_melotts_tts(self, text, output_path, base_speaker_key="ZH"):
+
+    def generate_with_melotts_tts(self, text, output_path, base_speaker_key="ZH" ,speed = 0.9):
         """尝试使用MeloTTS生成语音"""
         # 保存原始环境变量
         import os
@@ -388,12 +347,16 @@ class VoiceGenerator:
             print(f"[VoiceGenerator] 输出路径: {output_path}")
             print(f"[VoiceGenerator] 说话人key: {base_speaker_key}")
 
-            # 临时设置环境变量，强制使用CPU，避免MPS问题
-            print(f"[VoiceGenerator] 设置环境变量强制使用CPU...")
-            os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '0'
-            os.environ['CUDA_VISIBLE_DEVICES'] = ''
-            print(f"[VoiceGenerator] PYTORCH_ENABLE_MPS_FALLBACK: {os.environ.get('PYTORCH_ENABLE_MPS_FALLBACK')}")
-            print(f"[VoiceGenerator] CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES')}")
+            # # 临时设置环境变量，强制使用CPU，避免MPS问题
+            # print(f"[VoiceGenerator] 设置环境变量强制使用CPU...")
+            # os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '0'
+            # os.environ['CUDA_VISIBLE_DEVICES'] = ''
+            # print(f"[VoiceGenerator] PYTORCH_ENABLE_MPS_FALLBACK: {os.environ.get('PYTORCH_ENABLE_MPS_FALLBACK')}")
+            # print(f"[VoiceGenerator] CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES')}")
+
+            device=DeviceUtils._get_optimal_device()
+
+            print(f"[VoiceGenerator] 选择的设备: {device}")
 
             print(f"[VoiceGenerator] 正在导入MeloTTS...")
             from melo.api import TTS
@@ -406,11 +369,11 @@ class VoiceGenerator:
                 "ZH": "ZH", "JP": "JP", "KR": "KR"
             }
 
-            language = language_mapping.get(base_speaker_key, "EN")
+            language = language_mapping.get(base_speaker_key, "ZH")
             print(f"[VoiceGenerator] 映射后语言: {language}")
 
             # 使用缓存的模型
-            model = self._get_or_create_melotts_model(language, 'cpu')
+            model = self._get_or_create_melotts_model(language, device=device)
 
             speaker_ids = model.hps.data.spk2id
             print(f"[VoiceGenerator] 可用说话人: {dict(speaker_ids)}")
@@ -424,11 +387,20 @@ class VoiceGenerator:
                 print(f"[VoiceGenerator] 未找到说话人 {base_speaker_key}，使用默认说话人: {speaker_id}")
 
             # 生成语音
-            speed = 1.0
             print(f"[VoiceGenerator] 开始生成语音 (语速: {speed})...")
             print(f"[VoiceGenerator] 模型参数: 语言={language}, 说话人ID={speaker_id}, 输出路径={output_path}")
 
-            model.tts_to_file(text, speaker_id, output_path, speed=speed)
+            model.tts_to_file(
+                text,
+                speaker_id,
+                output_path,
+                speed=speed,
+                sdp_ratio=0.2,        # 韵律相似度
+                noise_scale=0.6,      # 音频变化度
+                noise_scale_w=0.8,    # 音频质量
+                format='WAV'          # 明确格式
+
+            )
 
             # 检查文件是否成功生成
             if os.path.exists(output_path):
@@ -467,9 +439,13 @@ class VoiceGenerator:
 
 
 class OpenVoiceService:
-    """OpenVoice服务主类 - 协调各个组件"""
+    """
+    OpenVoice服务主类 - 协调各个组件
+    线程安全的懒汉式单例模式
+    """
 
     _instance = None
+    _lock = threading.Lock()
     _initialized = False
 
     def __new__(cls):
@@ -478,41 +454,91 @@ class OpenVoiceService:
         return cls._instance
 
     def __init__(self):
-        if not self._initialized:
-            print("[OpenVoice] ===============================================")
-            print("[OpenVoice] 初始化OpenVoice服务...")
-            print("[OpenVoice] ===============================================")
-
-            # 初始化组件
-            print("[OpenVoice] 初始化PathManager...")
-            self.path_manager = PathManager()
-            print(f"[OpenVoice] PathManager初始化完成，项目根目录: {self.path_manager.project_root}")
-
-            print("[OpenVoice] 初始化ModelManager...")
-            self.model_manager = ModelManager(self.path_manager)
-
-            print("[OpenVoice] 初始化SpeakerFeatureManager...")
-            self.feature_manager = SpeakerFeatureManager(self.path_manager)
-
-            print("[OpenVoice] 初始化VoiceGenerator...")
-            self.voice_generator = VoiceGenerator(self.path_manager)
-
-            print("[OpenVoice] 初始化AudioProcessor...")
-            self.audio_processor = AudioProcessor()
-
-            # 初始化模型
-            print("[OpenVoice] 开始初始化模型组件...")
-            # 确保tts_model属性存在（V2版本主要使用MeloTTS）
-            self.tts_model = None
-            self._initialize_components()
+        if not OpenVoiceService._initialized:
+            self._initialize_service()
             OpenVoiceService._initialized = True
 
-            print("[OpenVoice] ===============================================")
-            print("[OpenVoice] OpenVoice服务初始化完成")
-            print(f"[OpenVoice] 服务ID: {id(self)}")
-            print(f"[OpenVoice] 音色转换器状态: {'✅ 已加载' if self.tone_converter else '❌ 未加载'}")
-            print(f"[OpenVoice] 已加载说话人数量: {len(self.feature_manager.speaker_features)}")
-            print("==============================================")
+    def _initialize_service(self):
+        """实际的服务初始化逻辑"""
+        print("[OpenVoice] ===============================================")
+        print("[OpenVoice] 初始化OpenVoice服务...")
+        print("[OpenVoice] ===============================================")
+
+        # 初始化组件
+        print("[OpenVoice] 初始化PathManager...")
+        self.path_manager = PathManager()
+        print(f"[OpenVoice] PathManager初始化完成，项目根目录: {self.path_manager.project_root}")
+
+        print("[OpenVoice] 初始化ModelManager...")
+        self.model_manager = ModelManager(self.path_manager)
+
+        print("[OpenVoice] 初始化SpeakerFeatureManager...")
+        self.feature_manager = SpeakerFeatureManager(self.path_manager)
+
+        print("[OpenVoice] 初始化VoiceGenerator...")
+        self.voice_generator = VoiceGenerator(self.path_manager)
+
+        print("[OpenVoice] 初始化AudioProcessor...")
+        self.audio_processor = AudioProcessor()
+
+        # 初始化模型
+        print("[OpenVoice] 开始初始化模型组件...")
+        # 确保tts_model属性存在（V2版本主要使用MeloTTS）
+        self.tts_model = None
+        self._initialize_components()
+
+        print("[OpenVoice] ===============================================")
+        print("[OpenVoice] OpenVoice服务初始化完成")
+        print(f"[OpenVoice] 服务ID: {id(self)}")
+        print(f"[OpenVoice] 音色转换器状态: {'✅ 已加载' if self.tone_converter else '❌ 未加载'}")
+        print(f"[OpenVoice] 已加载说话人数量: {len(self.feature_manager.speaker_features)}")
+        print("==============================================")
+
+    @classmethod
+    def get_instance(cls):
+        """
+        获取OpenVoiceService单例实例
+
+        Returns:
+            OpenVoiceService: 服务实例
+        """
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = cls()
+        return cls._instance
+
+    @classmethod
+    def get(cls):
+        """
+        获取OpenVoiceService单例实例的简化方法
+
+        Returns:
+            OpenVoiceService: 服务实例
+        """
+        return cls.get_instance()
+
+    @classmethod
+    def is_initialized(cls):
+        """
+        检查服务是否已初始化
+
+        Returns:
+            bool: 是否已初始化
+        """
+        return cls._initialized
+
+    @classmethod
+    def reset_instance(cls):
+        """
+        重置单例实例（主要用于测试）
+        注意：这会清除当前实例，下次调用get_instance会创建新实例
+        """
+        with cls._lock:
+            if cls._instance is not None:
+                # 可以在这里执行清理操作
+                cls._instance = None
+                cls._initialized = False
 
     def _initialize_components(self):
         """初始化所有组件"""
@@ -573,30 +599,29 @@ class OpenVoiceService:
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             output_path = self.path_manager.get_output_voice_path(timestamp)
 
-            # 确保输出目录存在
-            output_dir = os.path.dirname(output_path)
-            os.makedirs(output_dir, exist_ok=True)
+            # 确保输出目录存在 - 使用PathManager
+            self.path_manager.ensure_file_directory(output_path)
 
             print(f"[OpenVoice] 输出文件路径: {output_path}")
 
             if speaker_id and speaker_id in self.feature_manager.speaker_features:
                 # 使用说话人克隆（V2方式）
                 if not self.tone_converter:
-                    print("[OpenVoice] ❌ 语音克隆需要音色转换器，但转换器未初始化")
+                    print("[OpenVoice]  语音克隆需要音色转换器，但转换器未初始化")
                     return None
 
-                print(f"[OpenVoice] 🎭 使用说话人克隆模式: {speaker_id}")
+                print(f"[OpenVoice]  使用说话人克隆模式: {speaker_id}")
                 print(f"[OpenVoice] 可用说话人: {list(self.feature_manager.speaker_features.keys())}")
                 return self._clone_voice_with_cached_feature(text, speaker_id, output_path)
             else:
                 # 使用基础TTS（MeloTTS）
                 print("[OpenVoice] 🎤 使用基础TTS模式（MeloTTS）")
                 if speaker_id:
-                    print(f"[OpenVoice] ⚠️  说话人 {speaker_id} 不存在，切换到基础TTS")
+                    print(f"[OpenVoice]   说话人 {speaker_id} 不存在，切换到基础TTS")
                 return self._generate_base_speech(text, output_path)
 
         except Exception as e:
-            print(f"[OpenVoice] ❌ 语音生成异常: {type(e).__name__}: {e}")
+            print(f"[OpenVoice]  语音生成异常: {type(e).__name__}: {e}")
             import traceback
             print(f"[OpenVoice] 错误堆栈:")
             traceback.print_exc()
@@ -611,24 +636,38 @@ class OpenVoiceService:
 
             speaker_info = self.feature_manager.get_feature(speaker_id)
             target_se = speaker_info['se']
+            # 确保目标特征也在正确的设备上
+            target_se = target_se.to(self.model_manager.device)
+            print(f"[OpenVoice]  目标特征设备: {target_se.device}")
 
             # 1. 先用基础模型生成语音（使用MeloTTS）
-            temp_audio = os.path.join(self.path_manager.project_root, f"temp_base_{speaker_id}_{int(time.time())}.wav")
+            temp_audio = self.path_manager.get_temp_voice_path(f"base_{speaker_id}")
             base_speaker_path = self._generate_base_speech(text, temp_audio, base_speaker_key)
 
             if not base_speaker_path:
                 return None
 
             # 2. 加载基础说话人特征 - 使用PathManager
-            source_se_path = self.path_manager.get_model_path("OpenVoice/checkpoints_v2/base_speakers/ses", f"{base_speaker_key.lower()}.pth")
+            source_se_path = self.path_manager.get_root_begin_path("OpenVoice/checkpoints_v2/base_speakers/ses", f"{base_speaker_key.lower()}.pth")
+            print(f"[OpenVoice]  查找基础说话人特征: {source_se_path}")
+            print(f"[OpenVoice]  文件存在: {os.path.exists(source_se_path)}")
+
             if os.path.exists(source_se_path):
+                print(f"[OpenVoice]  开始加载基础说话人特征...")
                 source_se = torch.load(source_se_path, map_location=self.model_manager.device)
+                print(f"[OpenVoice]  基础说话人特征加载成功，形状: {source_se.shape}")
+                print(f"[OpenVoice]  基础特征设备: {source_se.device}")
             else:
-                print(f"[OpenVoice] 未找到基础说话人特征: {source_se_path}")
+                print(f"[OpenVoice]  未找到基础说话人特征: {source_se_path}")
                 return None
 
             # 3. 使用缓存的特征进行音色转换
             encode_message = "@MyShell"
+            print(f"[OpenVoice]  开始音色转换...")
+            print(f"[OpenVoice]  输入音频: {temp_audio}")
+            print(f"[OpenVoice]  输出音频: {output_path}")
+            print(f"[OpenVoice]  编码消息: {encode_message}")
+            print(f"[OpenVoice]  目标特征形状: {target_se.shape}")
             self.tone_converter.convert(
                 audio_src_path=temp_audio,
                 src_se=source_se,
@@ -636,7 +675,9 @@ class OpenVoiceService:
                 output_path=output_path,
                 message=encode_message
             )
-
+            
+            print(f"[OpenVoice]  音色转换完成")
+            
             print(f"[OpenVoice] 使用V2模型和缓存特征生成语音: {speaker_id}")
             return output_path
 
@@ -727,3 +768,20 @@ class OpenVoiceService:
     def download_openvoice_models(self):
         """下载OpenVoice V2预训练模型（兼容性方法）"""
         return self.model_manager._download_models()
+
+
+class DeviceUtils:
+    """设备工具类，提供设备相关的实用方法"""
+
+    @staticmethod
+    def _get_optimal_device():
+        """智能设备选择"""
+        if torch.cuda.is_available():
+            # 检查GPU内存
+            if torch.cuda.get_device_properties(0).total_memory > 4e9:  # 4GB+
+                return "cuda"
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            # Apple Silicon支持
+            return "mps"
+        else:
+            return "cpu"

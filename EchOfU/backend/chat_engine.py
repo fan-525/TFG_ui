@@ -5,7 +5,7 @@ import shutil
 from .path_manager import PathManager
 from .voice_generator import OpenVoiceService
 # 需要导入 video_generator 中的函数来生成最终视频
-from video_generator import generate_video
+from .video_generator import generate_video
 
 def chat_response(data):
     """
