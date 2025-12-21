@@ -13,8 +13,6 @@ CosyVoice语音生成服务模块
 - 高质量
 - 稳定可靠
 
-@author: CosyVoice Service Team
-@version: 2.0.0 (简化版)
 """
 
 import os
