@@ -41,6 +41,7 @@ sys.path.append(str(COSYVOICE_PATH))
 
 # 导入现有的工具模块
 from .path_manager import PathManager
+from .model_download_manager import ModelDownloadManager, DownloadSource, ModelType
 
 # CosyVoice导入检查
 try:
@@ -249,21 +250,14 @@ class AudioValidator(LoggerMixin):
 
             # 获取音频信息
             try:
-                # 尝试使用torchaudio.info，如果失败则使用wave等替代方法
-                try:
-                    info = torchaudio.info(audio_path)
-                    sample_rate = info.sample_rate
-                    num_frames = info.num_frames
-                    num_channels = info.num_channels
-                except AttributeError:
-                    # 对于较老版本的torchaudio，使用wave模块
-                    import wave
-                    with wave.open(audio_path, 'rb') as wav_file:
-                        sample_rate = wav_file.getframerate()
-                        num_frames = wav_file.getnframes()
-                        num_channels = wav_file.getnchannels()
+                # 对于支持的格式，先尝试使用torchaudio加载
+                waveform, sample_rate = torchaudio.load(audio_path)
 
+                # 从加载的数据中获取信息
+                num_channels = waveform.shape[0] if waveform.dim() >= 2 else 1
+                num_frames = waveform.shape[1] if waveform.dim() >= 2 else waveform.shape[0]
                 duration = num_frames / sample_rate
+
                 metadata = AudioMetadata(
                     file_path=os.path.abspath(audio_path),
                     duration=duration,
@@ -271,8 +265,45 @@ class AudioValidator(LoggerMixin):
                     channels=num_channels,
                     file_size=os.path.getsize(audio_path)
                 )
+
             except Exception as e:
-                raise AudioValidationError(f"音频文件读取失败: {e}")
+                # 如果torchaudio加载失败，尝试其他方法
+                try:
+                    # 使用mutagen获取音频元数据（如果可用）
+                    try:
+                        from mutagen import File
+                        audio_file = File(audio_path)
+                        if audio_file is not None:
+                            duration = audio_file.info.length
+                            sample_rate = int(getattr(audio_file.info, 'sample_rate', 44100))
+                            num_channels = getattr(audio_file.info, 'channels', 2)
+
+                            metadata = AudioMetadata(
+                                file_path=os.path.abspath(audio_path),
+                                duration=duration,
+                                sample_rate=sample_rate,
+                                channels=num_channels,
+                                file_size=os.path.getsize(audio_path)
+                            )
+                        else:
+                            raise Exception("mutagen无法解析音频文件")
+                    except ImportError:
+                        # 最后回退方案：估算信息
+                        file_size = os.path.getsize(audio_path)
+                        # 假设平均比特率为128kbps
+                        estimated_duration = (file_size * 8) / (128000)
+
+                        metadata = AudioMetadata(
+                            file_path=os.path.abspath(audio_path),
+                            duration=estimated_duration,
+                            sample_rate=44100,  # 默认采样率
+                            channels=2,  # 默认立体声
+                            file_size=file_size
+                        )
+                        self.logger.warning(f"使用估算的音频信息: {audio_path}")
+
+                except Exception as fallback_e:
+                    raise AudioValidationError(f"音频文件读取失败: {e} (回退方案也失败: {fallback_e})")
 
             # 验证音频时长
             if metadata.duration < self.min_duration:
@@ -534,17 +565,28 @@ class CosyService(LoggerMixin):
             self.audio_validator = AudioValidator()
             self.audio_processor = AudioProcessor(self.path_manager)
 
+            # 初始化模型下载管理器
+            self.model_download_manager = ModelDownloadManager(self.path_manager)
+
             # 只有在CosyVoice可用时才初始化模型相关组件
             if COSYVOICE_AVAILABLE:
                 # 设置默认模型目录
                 if model_dir is None:
-                    model_dir = self.path_manager.get_root_begin_path(
-                        "CosyVoice", "pretrained_models", "Fun-CosyVoice3-0.5B"
-                    )
+                    model_dir = self.path_manager.get_cosyvoice3_2512_model_path()
+
+                # 检查模型是否存在，如果不存在则尝试自动下载
+                if not os.path.exists(model_dir):
+                    self.logger.info("[CosyService] 模型目录不存在，尝试自动下载...")
+                    self._auto_download_required_models()
 
                 # 初始化模型相关模块
-                self.model_manager = ModelManager(model_dir, self.device_manager)
-                self.voice_cloner = VoiceCloner(self.model_manager, self.audio_processor)
+                if os.path.exists(model_dir):
+                    self.model_manager = ModelManager(model_dir, self.device_manager)
+                    self.voice_cloner = VoiceCloner(self.model_manager, self.audio_processor)
+                else:
+                    self.model_manager = None
+                    self.voice_cloner = None
+                    self.logger.warning("[CosyService] 模型文件不存在，仅提供基础功能")
             else:
                 self.model_manager = None
                 self.voice_cloner = None
@@ -656,6 +698,154 @@ class CosyService(LoggerMixin):
 
         except Exception as e:
             self.logger.error(f"[CosyService] 服务清理失败: {e}")
+
+    def _auto_download_required_models(self):
+        """自动下载必需模型"""
+        try:
+            self.logger.info("[CosyService] 开始自动下载必需模型...")
+
+            # 下载最关键的模型
+            required_models = [ModelType.COSYVOICE3_2512]
+
+            results = self.model_download_manager.download_models(
+                required_models,
+                source=DownloadSource.AUTO,
+                force=False,
+                install_deps=False
+            )
+
+            # 检查下载结果
+            for model_type, success in results.items():
+                if success:
+                    self.logger.info(f"模型 {model_type.value} 下载成功")
+                else:
+                    self.logger.warning(f"模型 {model_type.value} 下载失败，将在使用时提供下载指引")
+
+        except Exception as e:
+            self.logger.warning(f"自动下载模型失败: {e}")
+
+    def download_model(self, model_type: ModelType, source: DownloadSource = DownloadSource.AUTO) -> bool:
+        """
+        下载指定模型
+
+        Args:
+            model_type: 模型类型
+            source: 下载源
+
+        Returns:
+            bool: 下载是否成功
+        """
+        return self.model_download_manager.download_model(model_type, source)
+
+    def download_models(self, model_types: List[ModelType],
+                        source: DownloadSource = DownloadSource.AUTO) -> Dict[ModelType, bool]:
+        """
+        下载多个模型
+
+        Args:
+            model_types: 模型类型列表
+            source: 下载源
+
+        Returns:
+            Dict[ModelType, bool]: 下载结果
+        """
+        return self.model_download_manager.download_models(model_types, source)
+
+    def get_download_status(self) -> Dict[str, Any]:
+        """获取模型下载状态"""
+        return self.model_download_manager.get_download_statistics()
+
+    def is_model_downloaded(self, model_type: ModelType) -> bool:
+        """检查模型是否已下载"""
+        return self.model_download_manager.is_model_downloaded(model_type)
+
+    def get_model_path(self, model_type: ModelType) -> Optional[str]:
+        """获取模型本地路径"""
+        return self.model_download_manager.get_model_path(model_type)
+
+    def get_available_models(self) -> Dict[str, Any]:
+        """获取可用模型列表"""
+        models_info = {}
+        for model_type, model_info in self.model_download_manager.get_available_models().items():
+            models_info[model_type.value] = {
+                "description": model_info.description,
+                "size_gb": model_info.size_gb,
+                "downloaded": self.is_model_downloaded(model_type),
+                "local_path": self.get_model_path(model_type),
+                "required": model_info.required,
+                "priority": model_info.priority
+            }
+        return models_info
+
+    def prepare_cosyvoice_models(self, auto_download: bool = True) -> bool:
+        """
+        准备CosyVoice模型，包括检查和下载
+
+        Args:
+            auto_download: 是否自动下载缺失的模型
+
+        Returns:
+            bool: 准备是否成功
+        """
+        try:
+            if not COSYVOICE_AVAILABLE:
+                self.logger.warning("[CosyService] CosyVoice模块不可用，跳过模型准备")
+                return False
+
+            # 检查必需模型
+            required_models = [ModelType.COSYVOICE3_2512]
+            missing_models = [mt for mt in required_models if not self.is_model_downloaded(mt)]
+
+            if not missing_models:
+                self.logger.info("[CosyService] 所有必需模型已就绪")
+                return True
+
+            if auto_download:
+                self.logger.info(f"[CosyService] 发现 {len(missing_models)} 个缺失模型，开始下载...")
+                results = self.download_models(missing_models)
+
+                all_success = all(results.values())
+                if all_success:
+                    self.logger.info("[CosyService] 模型下载完成，CosyVoice准备就绪")
+                else:
+                    self.logger.warning("[CosyService] 部分模型下载失败")
+
+                return all_success
+            else:
+                self.logger.warning(f"[CosyService] 发现 {len(missing_models)} 个缺失模型，需要手动下载: {[mt.value for mt in missing_models]}")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"[CosyService] 模型准备失败: {e}")
+            return False
+
+    def get_comprehensive_status(self) -> Dict[str, Any]:
+        """获取综合服务状态（包含模型下载信息）"""
+        status = self.get_service_status()
+
+        # 添加模型下载信息
+        if hasattr(self, 'model_download_manager'):
+            download_stats = self.model_download_manager.get_download_statistics()
+            status.update({
+                "download_statistics": download_stats,
+                "available_models": self.get_available_models(),
+                "model_download_available": True
+            })
+        else:
+            status.update({
+                "download_statistics": None,
+                "available_models": {},
+                "model_download_available": False
+            })
+
+        # 添加路径信息
+        status["paths"] = {
+            "cosyvoice_root": self.path_manager.get_cosyvoice_path(),
+            "cosyvoice_models": self.path_manager.get_cosyvoice_models_path(),
+            "cosyvoice3_2512": self.path_manager.get_cosyvoice3_2512_model_path()
+        }
+
+        return status
 
 
 # ==================== 便捷函数 ====================
