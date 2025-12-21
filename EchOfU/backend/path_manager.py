@@ -98,6 +98,60 @@ class PathManager:
         """获取OpenVoice模型路径 (models/OpenVoice/)"""
         return self.get_models_path("OpenVoice", *path_parts)
 
+    def get_cosyvoice_path(self, *path_parts):
+        """获取CosyVoice相关路径"""
+        return self.get_root_begin_path("CosyVoice", *path_parts)
+
+    def get_cosyvoice_model_path(self, *path_parts):
+        """获取CosyVoice模型路径 (CosyVoice/pretrained_models/)"""
+        return self.get_cosyvoice_path("pretrained_models", *path_parts)
+
+    def get_cosyvoice3_path(self, *path_parts):
+        """获取CosyVoice3模型路径 (CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B/)"""
+        return self.get_cosyvoice_model_path("Fun-CosyVoice3-0.5B", *path_parts)
+
+    def get_cosyvoice_models_path(self):
+        """获取CosyVoice所有模型存储目录"""
+        return self.get_cosyvoice_model_path()
+
+    # CosyVoice3 具体模型路径
+    def get_cosyvoice3_fun_model_path(self):
+        """获取Fun-CosyVoice3-0.5B模型路径"""
+        return self.get_cosyvoice_model_path("Fun-CosyVoice3-0.5B")
+
+    def get_cosyvoice3_2512_model_path(self):
+        """获取Fun-CosyVoice3-0.5B-2512模型路径"""
+        return self.get_cosyvoice_model_path("Fun-CosyVoice3-0.5B-2512")
+
+    def get_cosyvoice2_model_path(self):
+        """获取CosyVoice2-0.5B模型路径"""
+        return self.get_cosyvoice_model_path("CosyVoice2-0.5B")
+
+    def get_cosyvoice_300m_model_path(self):
+        """获取CosyVoice-300M模型路径"""
+        return self.get_cosyvoice_model_path("CosyVoice-300M")
+
+    def get_cosyvoice_300m_sft_model_path(self):
+        """获取CosyVoice-300M-SFT模型路径"""
+        return self.get_cosyvoice_model_path("CosyVoice-300M-SFT")
+
+    def get_cosyvoice_300m_instruct_model_path(self):
+        """获取CosyVoice-300M-Instruct模型路径"""
+        return self.get_cosyvoice_model_path("CosyVoice-300M-Instruct")
+
+    def get_cosyvoice_ttsfrd_model_path(self):
+        """获取CosyVoice-ttsfrd模型路径"""
+        return self.get_cosyvoice_model_path("CosyVoice-ttsfrd")
+
+    # 获取模型状态文件路径
+    def get_model_status_file_path(self):
+        """获取模型状态文件路径"""
+        return self.get_cosyvoice_path("models_status.json")
+
+    def get_download_cache_path(self):
+        """获取下载缓存目录"""
+        return self.get_cosyvoice_path("download_cache")
+
     def get_speaker_features_path(self):
         """获取说话人特征文件路径 (models/OpenVoice/speaker_features.json)"""
         return self.get_openvoice_model_path("speaker_features.json")
