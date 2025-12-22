@@ -510,10 +510,80 @@ class AudioProcessor(LoggerMixin):
 
     def __init__(self, path_manager: PathManager):
         self.path_manager = path_manager
+        self._conversion_cache = {}
+
+    def _needs_conversion(self, audio_path: str) -> bool:
+        """检查音频是否需要格式转换"""
+        # .m4a 文件需要转换为 .wav
+        unsupported_formats = {'.m4a', '.aac', '.wma', '.mp4'}
+        return Path(audio_path).suffix.lower() in unsupported_formats
+
+    def _convert_to_wav(self, audio_path: str) -> str:
+        """
+        将音频文件转换为 WAV 格式
+
+        使用 pydub + ffmpeg 进行格式转换
+
+        Args:
+            audio_path: 原始音频文件路径
+
+        Returns:
+            str: 转换后的 WAV 文件路径
+        """
+        try:
+            from pydub import AudioSegment
+
+            audio_path = os.path.abspath(audio_path)
+            file_name = Path(audio_path).stem
+            file_hash = hash(audio_path + str(os.path.getmtime(audio_path)))
+
+            # 检查缓存
+            if file_hash in self._conversion_cache:
+                cached_path = self._conversion_cache[file_hash]
+                if os.path.exists(cached_path):
+                    self.logger.info(f"[AudioProcessor] 使用缓存的转换文件: {cached_path}")
+                    return cached_path
+
+            # 创建转换缓存目录
+            cache_dir = Path(self.path_manager.get_ref_voice_path()) / "__converted__"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+
+            # 生成转换后的文件路径
+            output_path = str(cache_dir / f"{file_name}_converted.wav")
+
+            self.logger.info(f"[AudioProcessor] 开始转换音频格式: {Path(audio_path).suffix} -> .wav")
+
+            # 使用 pydub 进行转换
+            audio = AudioSegment.from_file(audio_path)
+
+            # 导出为 WAV 格式
+            audio.export(output_path, format="wav")
+
+            # 缓存转换结果
+            self._conversion_cache[file_hash] = output_path
+
+            self.logger.info(f"[AudioProcessor] 音频转换完成: {output_path}")
+            self.logger.info(f"  原始大小: {os.path.getsize(audio_path) / 1024:.2f} KB")
+            self.logger.info(f"  转换后大小: {os.path.getsize(output_path) / 1024:.2f} KB")
+
+            return output_path
+
+        except ImportError:
+            raise AudioValidationError(
+                "音频格式转换需要 pydub 库。请安装: pip install pydub\n"
+                "同时需要安装 ffmpeg: https://ffmpeg.org/download.html"
+            )
+        except Exception as e:
+            raise AudioValidationError(f"音频格式转换失败: {e}")
 
     def load_audio(self, audio_path: str) -> Tuple[torch.Tensor, int]:
-        """加载音频文件"""
+        """加载音频文件（自动进行格式转换）"""
         try:
+            # 检查是否需要转换
+            if self._needs_conversion(audio_path):
+                self.logger.info(f"[AudioProcessor] 检测到需要转换的音频格式: {Path(audio_path).suffix}")
+                audio_path = self._convert_to_wav(audio_path)
+
             waveform, sample_rate = torchaudio.load(audio_path)
 
             # 转换为单声道
@@ -579,6 +649,13 @@ class VoiceCloner(LoggerMixin):
             else:
                 output_path = self.audio_processor.get_output_path()
 
+            # 检查参考音频是否需要格式转换（CosyVoice内部使用torchaudio.load，不支持.m4a）
+            reference_audio = request.reference_audio_path
+            if self.audio_processor._needs_conversion(reference_audio):
+                self.logger.info(f"[VoiceCloner] 参考音频需要格式转换: {Path(reference_audio).suffix}")
+                reference_audio = self.audio_processor._convert_to_wav(reference_audio)
+                self.logger.info(f"[VoiceCloner] 使用转换后的音频: {reference_audio}")
+
             # 准备提示文本 - 使用CosyVoice3推荐的高级提示格式
             # 必需的前缀，用于防止提示词内容被读入音频
             prefix_prompt = "You are a helpful assistant.<|endofprompt|>"
@@ -597,7 +674,7 @@ class VoiceCloner(LoggerMixin):
             for i, audio_data in enumerate(model.inference_zero_shot(
                 request.text,
                 prompt_text,
-                request.reference_audio_path,
+                reference_audio,  # 使用转换后的音频路径
                 stream=request.stream,
                 speed=request.speed
             )):
