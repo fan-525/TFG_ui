@@ -411,15 +411,30 @@ class ModelDownloadManager(LoggerMixin):
 
     def _get_required_files(self, model_type: ModelType) -> List[str]:
         """获取模型所需的关键文件列表"""
-        # 基于CosyVoice模型结构的通用检查
-        required_files = [
-            "config.yaml",
-            "pytorch_model.bin"
-        ]
-
-        # 根据模型类型添加特定文件
-        if model_type == ModelType.COSYVOICE_TTSFRD:
+        # 根据模型类型返回不同的必需文件列表
+        if model_type == ModelType.COSYVOICE3_2512:
+            # CosyVoice3 模型文件
+            required_files = [
+                "cosyvoice3.yaml",      # CosyVoice3 配置文件
+                "llm.pt",                # LLM 模型权重
+                "flow.pt",               # Flow 模型权重
+                "hift.pt",               # HiFT-GAN 声码器权重
+                "campplus.onnx",         # 说话人编码器
+                "speech_tokenizer_v3.onnx"  # 语音 tokenizer
+            ]
+        elif model_type in [ModelType.COSYVOICE2_05B, ModelType.COSYVOICE_300M,
+                            ModelType.COSYVOICE_300M_SFT, ModelType.COSYVOICE_300M_INSTRUCT]:
+            # CosyVoice/CosyVoice2 模型文件
+            required_files = [
+                "config.yaml",
+                "pytorch_model.bin"
+            ]
+        elif model_type == ModelType.COSYVOICE_TTSFRD:
+            # TTSFRD 资源文件
             required_files = ["resource.zip"]
+        else:
+            # 通用默认检查（宽松）
+            required_files = []
 
         return required_files
 
