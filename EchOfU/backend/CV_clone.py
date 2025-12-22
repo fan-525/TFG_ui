@@ -26,6 +26,15 @@ import torch
 import torchaudio
 import numpy as np
 
+# =============================================================================
+# 环境变量设置（解决中文路径问题）
+# =============================================================================
+# 设置 modelscope 缓存到项目目录，避免用户目录中文路径导致的问题
+PROJECT_ROOT = Path(__file__).parent.parent
+CACHE_DIR = PROJECT_ROOT / "modelscope_cache"
+os.environ['MODELSCOPE_CACHE'] = str(CACHE_DIR)
+os.makedirs(CACHE_DIR, exist_ok=True)
+
 # 添加CosyVoice路径
 COSYVOICE_PATH = Path(__file__).parent.parent / "CosyVoice"
 sys.path.append(str(COSYVOICE_PATH))
@@ -106,6 +115,7 @@ class VoiceCloneRequest:
     speed: float = 1.0
     stream: bool = False
     language: Optional[str] = None
+    request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
     def __post_init__(self):
         """请求验证"""
