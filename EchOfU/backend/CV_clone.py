@@ -30,6 +30,11 @@ import numpy as np
 COSYVOICE_PATH = Path(__file__).parent.parent / "CosyVoice"
 sys.path.append(str(COSYVOICE_PATH))
 
+# 添加Matcha-TTS路径（CosyVoice的依赖）
+MATCHA_TTS_PATH = COSYVOICE_PATH / "third_party" / "Matcha-TTS"
+if MATCHA_TTS_PATH.exists():
+    sys.path.insert(0, str(MATCHA_TTS_PATH))
+
 # 导入现有的工具模块
 from .path_manager import PathManager
 from .model_download_manager import ModelDownloadManager, DownloadSource, ModelType
@@ -346,6 +351,22 @@ class ModelManager(LoggerMixin):
                 # 检查模型目录
                 if not os.path.exists(self.model_dir):
                     raise ModelLoadError(f"模型目录不存在: {self.model_dir}")
+
+                # 使用 PathManager 进行模型完整性检查
+                path_manager = PathManager()
+                is_complete, missing_files, error_msg = path_manager.check_cosyvoice3_model_integrity(self.model_dir)
+
+                if not is_complete:
+                    self.logger.error(f"[ModelManager] 模型完整性检查失败: {error_msg}")
+                    self.logger.error("[ModelManager] 缺失的文件:")
+                    for missing in missing_files:
+                        self.logger.error(f"  - {missing}")
+
+                    raise ModelLoadError(
+                        f"模型文件不完整，无法加载。缺失 {len(missing_files)} 个必需文件。\n"
+                        f"建议: 重新下载模型或检查模型目录。\n"
+                        f"缺失文件列表:\n" + "\n".join(f"  - {m}" for m in missing_files)
+                    )
 
                 # 检测模型类型（CosyVoice/CosyVoice2/CosyVoice3）
                 cosyvoice3_yaml = os.path.join(self.model_dir, 'cosyvoice3.yaml')
@@ -683,15 +704,55 @@ class CosyService(LoggerMixin):
 
                 # 初始化模型相关模块
                 if os.path.exists(model_dir):
-                    self.model_manager = ModelManager(
-                        model_dir, self.device_manager,
-                        load_vllm=load_vllm,
-                        load_jit=load_jit,
-                        load_trt=load_trt,
-                        fp16=fp16,
-                        trt_concurrent=trt_concurrent
-                    )
-                    self.voice_cloner = VoiceCloner(self.model_manager, self.audio_processor)
+                    try:
+                        self.model_manager = ModelManager(
+                            model_dir, self.device_manager,
+                            load_vllm=load_vllm,
+                            load_jit=load_jit,
+                            load_trt=load_trt,
+                            fp16=fp16,
+                            trt_concurrent=trt_concurrent
+                        )
+                        self.voice_cloner = VoiceCloner(self.model_manager, self.audio_processor)
+                    except ModelLoadError as e:
+                        # 模型加载失败，检查是否是完整性问题
+                        is_complete, missing_files, _ = self.path_manager.check_cosyvoice3_model_integrity(model_dir)
+
+                        if not is_complete:
+                            self.logger.error(f"[CosyService] 模型不完整，缺失 {len(missing_files)} 个文件")
+                            self.logger.error("[CosyService] 将尝试自动重新下载模型...")
+
+                            # 尝试重新下载
+                            try:
+                                self._auto_download_required_models()
+
+                                # 下载后重新检查
+                                is_complete_after, _, _ = self.path_manager.check_cosyvoice3_model_integrity(model_dir)
+
+                                if is_complete_after:
+                                    self.logger.info("[CosyService] 模型下载完成，重新加载...")
+                                    self.model_manager = ModelManager(
+                                        model_dir, self.device_manager,
+                                        load_vllm=load_vllm,
+                                        load_jit=load_jit,
+                                        load_trt=load_trt,
+                                        fp16=fp16,
+                                        trt_concurrent=trt_concurrent
+                                    )
+                                    self.voice_cloner = VoiceCloner(self.model_manager, self.audio_processor)
+                                else:
+                                    self.logger.error("[CosyService] 模型下载后仍不完整，请手动检查")
+                                    self.model_manager = None
+                                    self.voice_cloner = None
+                            except Exception as download_error:
+                                self.logger.error(f"[CosyService] 自动下载失败: {download_error}")
+                                self.model_manager = None
+                                self.voice_cloner = None
+                        else:
+                            # 其他模型加载错误
+                            self.logger.error(f"[CosyService] 模型加载失败: {e}")
+                            self.model_manager = None
+                            self.voice_cloner = None
                 else:
                     self.model_manager = None
                     self.voice_cloner = None
