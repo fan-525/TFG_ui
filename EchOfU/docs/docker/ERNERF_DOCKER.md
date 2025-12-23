@@ -345,17 +345,4 @@ ERNERF_RESULT_PATH=./results
 - [AD-NeRF GitHub](https://github.com/YudongGuo/AD-NeRF)
 - [PyTorch3D文档](https://pytorch3d.org/docs/)
 
-## 更新日志
 
-### v1.0 (2024-12-24)
-- 基于官方Ubuntu 18.04 + CUDA 11.3 + PyTorch 1.12.1
-- 集成所有预训练模型下载
-- 修复face_tracker.py调用问题
-- 使用EAR算法替代OpenFace
-- 优化预处理参数（加快速度）
-- 支持三阶段自动训练
-- 完整的Docker封装方案
-
-## 联系方式
-
-如有问题，请提交Issue或联系项目维护者。
