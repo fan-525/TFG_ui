@@ -1,25 +1,13 @@
 ## 界面预览
 
-<table>
-<tr>
-<td><img src="resource/index.png" alt="首页" width="400"/></td>
-<td><img src="resource/audio.png" alt="语音克隆" width="400"/></td>
-</tr>
-<tr>
-<td><img src="resource/video.png" alt="视频生成" width="400"/></td>
-<td><img src="resource/train.png" alt="模型训练" width="400"/></td>
-</tr>
-<tr>
-<td><img src="resource/chat.png" alt="对话系统" width="400"/></td>
-</tr>
-</table>
+<img src="resource/index.png" alt="首页" width="400"/>
 
 ## 功能
 
-- **语音克隆**: CosyVoice、OpenVoice、MeloTTS
-- **视频生成**: ER-NeRF、SyncTalk
+- **语音克隆**: CosyVoice
+- **视频生成**: ER-NeRF
 - **模型训练**: 深度学习模型三阶段训练
-- **对话系统**: 人机交互
+- **对话系统**: 基于llm的人机交互
 
 ## 快速开始
 
